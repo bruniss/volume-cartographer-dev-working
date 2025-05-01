@@ -83,30 +83,43 @@ The volume package list can be refreshed to pick up new segmentations or changes
 
 ```cpp
 // Implementation from onRefreshListPressed()
-// 1. Clear existing data
+// 1. Store current volpkg path
+QString currentPath = fVpkgPath;
+
+// 2. Clear existing data
 for (auto& pair : _vol_qsurfs) {
-    _surf_col->removeSurface(pair.first);
+    _surf_col->setSurface(pair.first, nullptr);  // Use setSurface with nullptr to remove
 }
 _opchains.clear();
 _vol_qsurfs.clear();
 
-// 2. Reload segmentations
-std::vector<std::string> seg_ids = fVpkg->segmentationIDs();
-// Load segmentations in parallel
-#pragma omp parallel for
-for(int i=0; i<seg_ids.size(); i++) {
-    // Process each segmentation...
-}
-
-// 3. Update UI
-onSegFilterChanged(cmbFilterSegs->currentIndex());
-
-// 4. Update viewers
-for (auto &viewer : _viewers) {
-    viewer->invalidateVis();
-    viewer->invalidateIntersect();
-    viewer->renderVisible(true);
-    viewer->renderIntersections();
+// 3. Completely reinitialize the volume package to ensure fresh scan
+if (InitializeVolumePkg(currentPath.toStdString() + "/")) {
+    // 4. Re-fetch all segmentations with the reinitialized package
+    std::vector<std::string> seg_ids = fVpkg->segmentationIDs();
+    
+    // Load segmentations in parallel
+    #pragma omp parallel for
+    for(int i=0; i<seg_ids.size(); i++) {
+        // Process each segmentation...
+    }
+    
+    // 5. Rebuild the tree widget directly
+    {
+        const QSignalBlocker blocker{treeWidgetSurfaces};
+        treeWidgetSurfaces->clear();
+        
+        // Populate with all segmentation IDs to ensure complete refresh
+        for (auto &id : seg_ids) {
+            QTreeWidgetItem *item = new QTreeWidgetItem(treeWidgetSurfaces);
+            item->setText(0, QString(id.c_str()));
+            item->setData(0, Qt::UserRole, QVariant(id.c_str()));
+        }
+    }
+    
+    // 6. Apply the filters and update viewers
+    onSegFilterChanged(cmbFilterSegs->currentIndex());
+    // Update all viewers...
 }
 ```
 

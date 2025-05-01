@@ -1056,58 +1056,79 @@ void CWindow::onRefreshListPressed()
         return;
     }
     
-    // Clear the surface collections to prevent duplicates
-    for (auto& pair : _vol_qsurfs) {
-        _surf_col->removeSurface(pair.first);
-    }
-    
-    // Clear the opchains
-    _opchains.clear();
-    _vol_qsurfs.clear();
-    
     // Show status message
     onShowStatusMessage("Refreshing volume package list...", 3000);
     
-    // Re-fetch all segmentations
-    std::vector<std::string> seg_ids = fVpkg->segmentationIDs();
-    std::vector<std::pair<std::string,SurfaceMeta*>> load_sm(seg_ids.size());
+    // Store current volpkg path
+    QString currentPath = fVpkgPath;
     
-#pragma omp parallel for
-    for(int i=0;i<seg_ids.size();i++) {
-        auto seg = fVpkg->segmentation(seg_ids[i]);
-        if (seg->metadata().hasKey("format") && seg->metadata().get<std::string>("format") == "tifxyz") {
-            SurfaceMeta *sm = new SurfaceMeta(seg->path());
-            sm->surf();
-            load_sm[i] = {seg_ids[i], sm};
-        }
+    // Clear existing data
+    for (auto& pair : _vol_qsurfs) {
+        _surf_col->setSurface(pair.first, nullptr);
     }
+    _opchains.clear();
+    _vol_qsurfs.clear();
+    
+    // Completely reinitialize the volume package to ensure fresh scan
+    if (InitializeVolumePkg(currentPath.toStdString() + "/")) {
+        // Re-fetch all segmentations with the reinitialized package
+        std::vector<std::string> seg_ids = fVpkg->segmentationIDs();
+        std::vector<std::pair<std::string,SurfaceMeta*>> load_sm(seg_ids.size());
         
-    for(auto &pair : load_sm)
-        if (pair.second) {
-            _vol_qsurfs[pair.first] = pair.second;
-            _surf_col->setSurface(pair.first, pair.second->surf());
+        vc::Logger()->info("Found {} segmentation IDs during refresh", seg_ids.size());
+        
+#pragma omp parallel for
+        for(int i=0; i<seg_ids.size(); i++) {
+            auto seg = fVpkg->segmentation(seg_ids[i]);
+            if (seg->metadata().hasKey("format") && seg->metadata().get<std::string>("format") == "tifxyz") {
+                SurfaceMeta *sm = new SurfaceMeta(seg->path());
+                sm->surf();
+                load_sm[i] = {seg_ids[i], sm};
+            }
         }
-    
-    // Refresh the UI with the updated list
-    onSegFilterChanged(cmbFilterSegs->currentIndex());
-    
-    // Refresh all viewer intersections
-    std::set<std::string> dbg_intersects = {"segmentation"};
-    for (auto &id : _vol_qsurfs) {
-        dbg_intersects.insert(id.first);
+            
+        for(auto &pair : load_sm)
+            if (pair.second) {
+                _vol_qsurfs[pair.first] = pair.second;
+                _surf_col->setSurface(pair.first, pair.second->surf());
+            }
+        
+        // Clear and rebuild the tree widget directly
+        {
+            const QSignalBlocker blocker{treeWidgetSurfaces};
+            treeWidgetSurfaces->clear();
+            
+            // Populate with all segmentation IDs to ensure complete refresh
+            for (auto &id : seg_ids) {
+                QTreeWidgetItem *item = new QTreeWidgetItem(treeWidgetSurfaces);
+                item->setText(0, QString(id.c_str()));
+                item->setData(0, Qt::UserRole, QVariant(id.c_str()));
+            }
+        }
+        
+        // Now apply the filters
+        onSegFilterChanged(cmbFilterSegs->currentIndex());
+        
+        // Refresh all viewer intersections
+        std::set<std::string> dbg_intersects = {"segmentation"};
+        for (auto &id : _vol_qsurfs) {
+            dbg_intersects.insert(id.first);
+        }
+        
+        for (auto &viewer : _viewers)
+            if (viewer->surfName() != "segmentation")
+                viewer->setIntersects(dbg_intersects);
+        
+        // Update all viewers to reflect the changes
+        for (auto &viewer : _viewers) {
+            viewer->invalidateVis();
+            viewer->invalidateIntersect();
+            viewer->renderVisible(true);
+            viewer->renderIntersections();
+        }
+        
+        onShowStatusMessage("Volume package list refreshed successfully", 3000);
+    } else {
+        onShowStatusMessage("Failed to refresh volume package", 3000);
     }
-    
-    for (auto &viewer : _viewers)
-        if (viewer->surfName() != "segmentation")
-            viewer->setIntersects(dbg_intersects);
-    
-    // Update all viewers to reflect the changes
-    for (auto &viewer : _viewers) {
-        viewer->invalidateVis();
-        viewer->invalidateIntersect();
-        viewer->renderVisible(true);
-        viewer->renderIntersections();
-    }
-    
-    onShowStatusMessage("Volume package list refreshed", 3000);
 }
