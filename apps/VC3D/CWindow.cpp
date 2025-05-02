@@ -16,6 +16,7 @@
 #include "OpChain.hpp"
 #include "opslist.hpp"
 #include "opssettings.hpp"
+#include "CSegmentationEditorWindow.hpp"
 
 
 #include "vc/core/types/Color.hpp"
@@ -37,7 +38,8 @@ namespace fs = std::filesystem;
 // Constructor
 CWindow::CWindow() :
     fVpkg(nullptr),
-    distanceTransformWidget(nullptr)
+    distanceTransformWidget(nullptr),
+    segmentationEditorWindow(nullptr)
 {
     const QSettings settings("VC.ini", QSettings::IniFormat);
     setWindowIcon(QPixmap(":/images/logo.png"));
@@ -260,6 +262,16 @@ void CWindow::CreateWidgets(void)
     connect(_btnResetPoints, &QPushButton::pressed, this, &CWindow::onResetPoints);
     connect(this->findChild<QPushButton*>("btnEditMask"), &QPushButton::pressed, this, &CWindow::onEditMaskPressed);
     connect(this->findChild<QPushButton*>("btnRefreshList"), &QPushButton::pressed, this, &CWindow::onRefreshListPressed);
+    
+    // Add "View in Editor" button below "edit segment mask" button
+    auto grpVolManager = this->findChild<QGroupBox*>("grpVolManager");
+    if (grpVolManager && grpVolManager->layout()) {
+        auto btnViewInEditor = new QPushButton("view in editor", grpVolManager);
+        if (QVBoxLayout* vLayout = qobject_cast<QVBoxLayout*>(grpVolManager->layout())) {
+            vLayout->addWidget(btnViewInEditor);
+        }
+        connect(btnViewInEditor, &QPushButton::pressed, this, &CWindow::onViewInEditorPressed);
+    }
     
     // Z slice navigation
     sliderZSlice = this->findChild<QSlider*>("sliderZSlice");
@@ -1047,6 +1059,56 @@ void CWindow::updateZSliceControls(int z_value)
     const QSignalBlocker blockSpinBox(spinBoxZSlice);
     spinBoxZSlice->setRange(0, maxZ);
     spinBoxZSlice->setValue(z_value);
+}
+
+void CWindow::onViewInEditorPressed()
+{
+    // Make sure we have a valid surface selected
+    if (!_surf) {
+        onShowStatusMessage("No segmentation surface selected", 3000);
+        return;
+    }
+    
+    // Create the editor window if it doesn't exist yet
+    if (!segmentationEditorWindow) {
+        // Create a new editor window with the current surface collection
+        segmentationEditorWindow = new CSegmentationEditorWindow(_surf_col, this);
+        
+        // Create an independent ChunkCache for the editor to prevent shared cache issues
+        ChunkCache* editorCache = new ChunkCache(1e9); // 1GB cache size for the editor
+        
+        // Set the cache on the editor's volume viewer but DO NOT connect it to this window's signals
+        if (CVolumeViewer* editorViewer = segmentationEditorWindow->findChild<CVolumeViewer*>()) {
+            editorViewer->setCache(editorCache);
+            
+            // Set the volume directly instead of connecting to our signal
+            if (currentVolume) {
+                editorViewer->OnVolumeChanged(currentVolume);
+            }
+        }
+        
+        // Don't delete when closed, just hide
+        segmentationEditorWindow->setAttribute(Qt::WA_DeleteOnClose, false);
+    }
+    else {
+        // If the editor already exists, make sure it has the current surface
+        // This ensures reopening the editor shows the latest segmentation
+        if (CVolumeViewer* editorViewer = segmentationEditorWindow->findChild<CVolumeViewer*>()) {
+            if (currentVolume) {
+                editorViewer->OnVolumeChanged(currentVolume);
+            }
+        }
+    }
+    
+    // Set the current segmentation surface
+    segmentationEditorWindow->setSegmentationSurface("segmentation");
+    
+    // Show the window (bring to front if already visible)
+    segmentationEditorWindow->show();
+    segmentationEditorWindow->raise();
+    segmentationEditorWindow->activateWindow();
+    
+    onShowStatusMessage("Opened segmentation in editor", 3000);
 }
 
 void CWindow::onRefreshListPressed()

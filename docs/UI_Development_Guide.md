@@ -244,3 +244,71 @@ lblLoc[2]->setText(QString::number(poi->p[2]));
 ```
 
 This guide should help developers understand the key components and patterns used in the Volume Cartographer UI, making it easier to implement UI changes and extensions.
+
+## Segmentation View and Editor
+
+### Segmentation View Implementation
+
+The segmentation view in Volume Cartographer displays a QuadSurface that represents the segmented area. Here's how it works:
+
+1. **Surface Rendering**: The segmentation surface ("segmentation") is a QuadSurface that is rendered by projecting 3D points onto a 2D plane.
+   - The `CVolumeViewer::render_area()` method handles the core rendering process
+   - For QuadSurfaces, it uses the `_surf->gen()` function to generate coordinates for rendering
+   - It then reads interpolated 3D data from the volume dataset using these coordinates
+
+2. **Intersection Rendering**: The segmentation view also shows intersections with other planes:
+   - `CVolumeViewer::renderIntersections()` handles this process
+   - For QuadSurfaces like the segmentation, it finds intersections with other planes
+   - It uses the `find_intersect_segments()` function to calculate the exact intersection lines
+   - These lines are then displayed as colored lines (usually yellow) on top of the rendered surface
+
+3. **Z-Offset Handling**: The z-offset (`_z_off`) allows viewing slices offset from the original surface:
+   - When rendering with `_z_off` not equal to zero, the coordinates are shifted along the normal
+   - This enables viewing slightly above or below the surface
+
+### Segmentation Editor Window
+
+The Segmentation Editor window provides a dedicated interface for examining the segmentation from different angles:
+
+1. **Implementation Overview**:
+   - Uses a separate window (`CSegmentationEditorWindow`) with its own CVolumeViewer instance
+   - Has an isolated surface collection to prevent modifications from affecting the main window
+   - Includes a left toolbar with controls for adjusting the view
+
+2. **View Controls**:
+   - **Plane Offset Slider**: Moves the view forward/backward along the surface normal
+   - **Step Size Slider**: Controls the increment size for each offset step
+   - **Navigation Buttons**: Allow for step-by-step movement along the normal
+
+3. **Technical Implementation**:
+   - The editor uses the `onZoom` method with Shift modifier to adjust the z-offset
+   - It maintains its own copy of all needed surfaces and POIs
+   - Intersections are recalculated within the editor's context
+   - The view is isolated from the main window to prevent changes from affecting other views
+
+### Implementation Details
+
+To understand the rendering process more deeply:
+
+1. For QuadSurfaces (like the segmentation surface):
+   ```cpp
+   // In CVolumeViewer::render_area()
+   cv::Vec2f roi_c = {roi.x+roi.width/2, roi.y + roi.height/2};
+   _ptr = _surf->pointer();
+   cv::Vec3f diff = {roi_c[0], roi_c[1], 0};
+   _surf->move(_ptr, diff/_scale);
+   _vis_center = roi_c;
+   _surf->gen(&coords, nullptr, roi.size(), _ptr, _scale, {-roi.width/2, -roi.height/2, _z_off});
+   ```
+
+2. For intersections with QuadSurfaces:
+   ```cpp
+   // In CVolumeViewer::renderIntersections()
+   if (_surf_name == "segmentation") {
+     // Find intersections with other planes
+     std::vector<std::pair<std::string,std::string>> intersects = _surf_col->intersections("segmentation");
+     // ... processing and rendering lines ...
+   }
+   ```
+
+When implementing features that interact with the segmentation view, consider these rendering mechanisms to ensure proper visualization.

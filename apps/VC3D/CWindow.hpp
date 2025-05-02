@@ -35,6 +35,7 @@ namespace ChaoVis
 
 class CVolumeViewer;
 class CSurfaceCollection;
+class CSegmentationEditorWindow;
 
 class CWindow : public QMainWindow
 {
@@ -105,6 +106,7 @@ private slots:
     void onSurfaceSelected(QTreeWidgetItem *current, QTreeWidgetItem *previous);
     void onSegFilterChanged(int index);
     void onEditMaskPressed();
+    void onViewInEditorPressed();
 private:
     std::shared_ptr<volcart::VolumePkg> fVpkg;
     Surface *_seg_surf;
@@ -169,6 +171,9 @@ private:
     
     // Distance transform widget
     CDistanceTransformWidget* distanceTransformWidget;
+    
+    // Segmentation editor window
+    CSegmentationEditorWindow* segmentationEditorWindow;
 };  // class CWindow
 
 }  // namespace ChaoVis
